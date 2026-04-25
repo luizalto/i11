@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+
+<script>
+!function(f,b,e,v,n,t,s){
+if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)
+}(window, document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+
+fbq('init', '799819532599997');
+fbq('track', 'PageView');
+</script>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Abrir Shopee</title>
+
+<style>
+body {
+  margin: 0;
+  height: 100vh;
+  background-color: #E74B2E;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-family: Arial;
+}
+
+.botao {
+  background: white;
+  color: #E74B2E;
+  padding: 20px 60px;
+  font-size: 26px;
+  border-radius: 10px;
+  text-decoration: none;
+  font-weight: bold;
+  cursor: pointer;
+}
+</style>
+
+</head>
+
+<body>
+
+<a href="#" id="btnShopee" class="botao">
+Abrir a Shopee
+</a>
+
+<script>
+(function(){
+
+const LINK_SHOPEE = "https://s.shopee.com.br/4qBaEnyoyr";
+const API_URL = "https://shopee-utm-tracker.onrender.com";
+const UC = "N33lado";
+
+document.getElementById("btnShopee").addEventListener("click", function(e){
+  e.preventDefault();
+
+  const btn = this;
+  btn.innerText = "Redirecionando...";
+
+  const rect = btn.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const largura = rect.width;
+
+  let pos;
+
+  // 🔥 LÓGICA ORIGINAL (centro 10%)
+  const inicioCentro = largura * 0.45;
+  const fimCentro = largura * 0.55;
+
+  if (x < inicioCentro) {
+    pos = "Left";
+  } 
+  else if (x > fimCentro) {
+    pos = "Right";
+  } 
+  else {
+    pos = "Center";
+  }
+
+  // ============================
+  // 🔥 EVENTOS META (ADICIONADO)
+  // ============================
+
+  // Evento com parâmetro
+  fbq('trackCustom', 'ClickShopee', {
+    position: pos
+  });
+
+  // Eventos separados
+  if (pos === "Left") {
+    fbq('trackCustom', 'ClickShopee_Left');
+  } else if (pos === "Center") {
+    fbq('trackCustom', 'ClickShopee_Center');
+  } else {
+    fbq('trackCustom', 'ClickShopee_Right');
+  }
+
+  // ============================
+  // 🔥 FLUXO ORIGINAL (INALTERADO)
+  // ============================
+
+  const link = encodeURIComponent(LINK_SHOPEE);
+  const finalURL = `${API_URL}/?link=${link}&pos=${pos}&uc=${UC}`;
+
+  console.log("POS:", pos);
+  console.log("REDIRECT:", finalURL);
+
+  window.location.href = finalURL;
+});
+
+})();
+</script>
+
+</body>
+</html>
