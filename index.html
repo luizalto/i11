@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-
 <script>
 !function(f,b,e,v,n,t,s){
 if(f.fbq)return;n=f.fbq=function(){n.callMethod?
@@ -58,6 +57,18 @@ function enviarEvento(valor){
 const DEBUG = false
 
 // =========================================================
+// TOGGLE DA VARIÁVEL PARIDADE (Par/Ímpar)
+// =========================================================
+const params = new URLSearchParams(window.location.search)
+const ENABLE_PARIDADE = (() => {
+  const urlParam = params.get("paridade")
+  if(urlParam !== null) return urlParam === "1"
+  return true   // padrão: ligado
+})()
+
+if(DEBUG) console.log(`Paridade ativada? ${ENABLE_PARIDADE}`)
+
+// =========================================================
 // GOOGLE SHEETS — URL do Apps Script
 // =========================================================
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbyRp-cEQuFJpENz2zise9vxSZ8-xcF7mn4PmZvJ4_cohJYJODSZvTOLqQv9f2WOWOf6/exec"
@@ -75,7 +86,6 @@ function timeout(promise, ms, fallback){
 // =========================================================
 // PARAMS
 // =========================================================
-const params = new URLSearchParams(window.location.search)
 let LINK = null, UC = null
 
 const raw = params.get("dest")
@@ -128,6 +138,12 @@ function classSrc(s){
 
 const placementTag = classPlacement(plRaw)
 const sourceTag    = classSrc(srcRaw)
+
+// =========================================================
+// DIVISÃO DA HORA (hp) – mesmo valor usado no analisador
+// =========================================================
+const HP_PADRAO = 20;   // <-- altere conforme necessário
+const hp = HP_PADRAO;
 
 // =========================================================
 // BASE UC
@@ -282,6 +298,62 @@ const [velTag, batObj, movimento, redeTag] = await Promise.all([
 const ram = medirRAM()
 
 // =========================================================
+// PARIDADE (calculada a partir do minuto atual)
+// =========================================================
+let paridadeTag = null
+if(ENABLE_PARIDADE){
+  const agora = new Date()
+  const minuto = agora.getMinutes()
+  paridadeTag = minuto % 2 === 0 ? "Par" : "Ímpar"
+}
+
+// =========================================================
+// NOVAS VARIÁVEIS (requeridas pelo analisador)
+// =========================================================
+const agoraData = new Date()
+const hora = agoraData.getHours()
+const minuto = agoraData.getMinutes()
+const segundo = agoraData.getSeconds()
+const dia = agoraData.getDate()
+const diaSemana = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"][agoraData.getDay()]
+
+// Min_Dezena (dezena do minuto: 0-5 → par/ímpar)
+const dezena = Math.floor(minuto / 10)
+const minDezena = dezena % 2 === 0 ? "Par" : "Ímpar"
+
+// Min_Unidade (unidade do minuto)
+const unidade = minuto % 10
+const minUnidade = unidade % 2 === 0 ? "Par" : "Ímpar"
+
+// Seg_Metade (primeira ou segunda metade do minuto)
+const segMetade = segundo <= 30 ? "Seg_00_30" : "Seg_31_60"
+
+// Hora_Par (hora par ou ímpar)
+const horaPar = hora % 2 === 0 ? "Par" : "Ímpar"
+
+// Dia_Par (dia do mês par ou ímpar)
+const diaPar = dia % 2 === 0 ? "Par" : "Ímpar"
+
+// Periodo (Manhã, Tarde, Noite)
+let periodo = "Noite"
+if (hora >= 6 && hora <= 11) periodo = "Manhã"
+else if (hora >= 12 && hora <= 17) periodo = "Tarde"
+
+// B_Par (paridade do número da bateria)
+const bNum = parseInt((batObj.bateria.match(/\d+/) || [0])[0])
+const bPar = isNaN(bNum) ? null : (bNum % 2 === 0 ? "Par" : "Ímpar")
+
+// N_Par (paridade do número da velocidade)
+const nNum = parseInt((velTag.match(/\d+/) || [0])[0])
+const nPar = isNaN(nNum) ? null : (nNum % 2 === 0 ? "Par" : "Ímpar")
+
+// FBP e FBC (1 se cookie presente, 0 caso contrário)
+const fbpCookie = getCookie("_fbp")
+const fbcCookie = getCookie("_fbc")
+const FBP = (fbpCookie && fbpCookie !== "") ? 1 : 0
+const FBC = (fbcCookie && fbcCookie !== "") ? 1 : 0
+
+// =========================================================
 // DEBUG
 // =========================================================
 if(DEBUG){
@@ -297,6 +369,18 @@ if(DEBUG){
     "device:       [" + device        + "]\n" +
     "conexao:      [" + conexao       + "]\n" +
     "movimento:    [" + movimento     + "]\n" +
+    (ENABLE_PARIDADE ? "paridade:     [" + paridadeTag + "]\n" : "paridade:     [desativada]\n") +
+    "Min_Dezena:   [" + minDezena     + "]\n" +
+    "Min_Unidade:  [" + minUnidade    + "]\n" +
+    "Seg_Metade:   [" + segMetade     + "]\n" +
+    "Hora_Par:     [" + horaPar       + "]\n" +
+    "DiaSemana:    [" + diaSemana     + "]\n" +
+    "Dia_Par:      [" + diaPar        + "]\n" +
+    "Periodo:      [" + periodo       + "]\n" +
+    "B_Par:        [" + bPar          + "]\n" +
+    "N_Par:        [" + nPar          + "]\n" +
+    "FBP:          [" + FBP           + "]\n" +
+    "FBC:          [" + FBC           + "]\n" +
     "userId:       [" + userId        + "]"
   )
 }
@@ -304,7 +388,7 @@ if(DEBUG){
 // =========================================================
 // EVENTOS META — sinais individuais
 // =========================================================
-;[
+const eventosBasicos = [
   tempoTag,
   velTag,
   batObj.bateria,
@@ -317,18 +401,37 @@ if(DEBUG){
   movimento,
   redeTag,
   placementTag,
-  sourceTag
-].forEach(enviarEvento)
+  sourceTag,
+  minDezena,
+  minUnidade,
+  segMetade,
+  horaPar,
+  diaSemana,
+  diaPar,
+  periodo,
+  (bPar !== null ? bPar : ""),
+  (nPar !== null ? nPar : ""),
+  "FBP" + FBP,
+  "FBC" + FBC
+]
+if(ENABLE_PARIDADE && paridadeTag) eventosBasicos.push(paridadeTag)
+
+eventosBasicos.forEach(enviarEvento)
 
 // =========================================================
-// HORA DO CLIQUE — envia evento H00 a H23 conforme hora atual
+// HORA DO CLIQUE — granularidade configurável via parâmetro hp
 // =========================================================
-const horaTag = "H" + String(new Date().getHours()).padStart(2, "0")
-enviarEvento(horaTag)
+let horaTag;
+if (hp === 1) {
+  horaTag = "H" + String(hora).padStart(2, "0");
+} else {
+  const bucket = Math.min(Math.floor(minuto * hp / 60), hp - 1);
+  horaTag = "H" + String(hora).padStart(2, "0") + "M" + bucket;
+}
+enviarEvento(horaTag);
 
 // =========================================================
 // BROWSER TAG — EX (navegador externo) ou IX (Instagram interno)
-// Extraído do parâmetro UC recebido na URL
 // =========================================================
 const browserTag = /EX(?=ID)/i.test(UC) ? "EX" : /IX(?=ID)/i.test(UC) ? "IX" : "Outros"
 
@@ -351,655 +454,117 @@ const RUNTIME = {
   Source    : sourceTag,
   Browser   : browserTag,
   Hora      : horaTag,
+  // Novas variáveis:
+  Min_Dezena   : minDezena,
+  Min_Unidade  : minUnidade,
+  Seg_Metade   : segMetade,
+  Hora_Par     : horaPar,
+  DiaSemana    : diaSemana,
+  Dia_Par      : diaPar,
+  Periodo      : periodo,
+  B_Par        : bPar,
+  N_Par        : nPar,
+  FBP          : FBP,
+  FBC          : FBC
 }
+if(ENABLE_PARIDADE && paridadeTag) RUNTIME.Paridade = paridadeTag
 
 // =========================================================
 // EVENTOS PERSONALIZADOS — TOP RANKING
 // =========================================================
 
 // ─────────────────────────────────────────────────
-// TOP02 — cole as regras aqui quando tiver
+// TOP02 — 1 variável (cole as regras geradas pelo analisador)
 // ─────────────────────────────────────────────────
 const REGRAS_TOP02 = [
-  // { N: "N8", B: "B4", ... },
+  // Exemplo: { Browser: "EX" },
 ]
 
 // ─────────────────────────────────────────────────
-// TOP03 — cole as regras aqui quando tiver
+// TOP03 — 2 variáveis
 // ─────────────────────────────────────────────────
 const REGRAS_TOP03 = [
-  // { N: "N8", B: "B4", ... },
+  // Exemplo: { N: "N8", B: "B4" },
 ]
 
 // ─────────────────────────────────────────────────
-// Evento: TOP04 — 4 Variáveis por Taxa (Top 1000)
+// TOP04 — 3 variáveis
 // ─────────────────────────────────────────────────
-const REGRAS_TOP04 = [ 
+const REGRAS_TOP04 = [
+ 
 
-
-
+  { Hora: "H04M1", Min_Dezena: "Ímpar" },
+  { N: "N6", Hora: "H08M1" },
+  { C: "C1", Hora: "H11M0" },
+  { Source: "SI", Hora: "H01M0" },
+  { B: "B8", Hora: "H08M1" },
+  { Hora: "H20M1", DiaSemana: "Segunda" },
+  { Hora: "H11M0", DiaSemana: "Terça" },
+  { Hora: "H14M0", DiaSemana: "Segunda" },
+  { Placement: "PR", Hora: "H11M0" },
+  { B: "B8", C: "C1" },
+  { B: "B8", Hora: "H10M1" },
+  { Hora: "H09M0", DiaSemana: "Terça" },
+  { B: "B3", DiaSemana: "Sábado" },
+  { B: "B3", DiaSemana: "Domingo" },
+  { Conexao: "M", DiaSemana: "Sábado" },
+  { N: "N6", Hora: "H11M0" },
+  { B: "B9", Hora: "H12M0" },
+  { B: "B6", Hora: "H20M0" },
+  { RAM: "R2", Placement: "PU" },
+  { Placement: "PR", Hora: "H19M0" },
+  { Placement: "PR", Hora: "H18M1" },
+  { Hora: "H00M0", Seg_Metade: "Seg_00_30" },
+  { V: "V0", Hora: "H09M1" },
+  { N: "N6", Hora: "H22M0" },
+  { N: "N6", Hora: "H17M1" },
+  { N: "N6", Hora: "H20M0" },
+  { B: "B10", Hora: "H09M1" },
+  { B: "B_absent", Hora: "H08M1" },
+  { Movimento: "M1", Hora: "H08M1" },
+  { Hora: "H18M0", DiaSemana: "Segunda" },
+  { Movimento: "M1", Hora: "H08M0" },
+  { B: "B2", DiaSemana: "Segunda" },
+  { Rede: "RU", Hora: "H12M0" },
+  { N: "N6", Hora: "H16M0" },
+  { B: "B4", Rede: "RU" },
+  { B: "B5", Hora: "H12M1" },
+  { Tema: "D", Hora: "H23M0" },
+  { V: "V0", Hora: "H15M0" },
+  { Rede: "RU", Hora: "H06M1" },
+  { Placement: "PF", Hora: "H11M1" },
+  { Hora: "H17M0", DiaSemana: "Segunda" },
+  { B: "B_absent", Hora: "H06M1" },
+  { B: "B5", Hora: "H10M1" },
+  { B: "B10", Hora: "H07M1" },
+  { Tema: "D", Hora: "H12M0" },
+  { Hora: "H10M1", DiaSemana: "Domingo" },
+  { B: "B9", Hora: "H16M0" },
+  { Hora: "H15M1", DiaSemana: "Terça" },
+  { Hora: "H10M0", DiaSemana: "Sábado" },
+  { Hora: "H19M1", DiaSemana: "Domingo" },
+  { V: "V0", DiaSemana: "Segunda" },
+  { B: "B_absent", Hora: "H12M1" },
+  { RAM: "R2", Hora: "H18M1" },
+  { V: "V0", Min_Dezena: "Ímpar" },
+  { Hora: "H21M0", DiaSemana: "Segunda" },
+  { B: "B_absent", Hora: "H11M1" },
+  { Hora: "H13M0", DiaSemana: "Terça" },
+  { Hora: "H16M1", DiaSemana: "Terça" },
 
 
 
 ]
 
-
-
-  
 // ─────────────────────────────────────────────────
-// Evento: TOP05 — 5 Variáveis por Taxa (Top 600)
-// Cole no array REGRAS_TOP05 do redirect
+// TOP05 — 4 variáveis
 // ─────────────────────────────────────────────────
-const REGRAS_TOP05 = [
-  { B: "B10", RAM: "R3", Movimento: "M0", Placement: "PS", Hora: "H07" },  // #1 → 27.27% · 3 vendas · CPV 3.7
-  { T: "T1", B: "B10", Tema: "L", RAM: "R2", Hora: "H18" },  // #2 → 25% · 3 vendas · CPV 4
-  { T: "T1", B: "B10", Movimento: "M0", Placement: "PS", Hora: "H07" },  // #3 → 25% · 3 vendas · CPV 4
-  { N: "N8", B: "B10", Tema: "L", RAM: "R2", Hora: "H18" },  // #4 → 25% · 3 vendas · CPV 4
-  { N: "N8", B: "B10", Movimento: "M0", Placement: "PS", Hora: "H07" },  // #5 → 25% · 3 vendas · CPV 4
-  { B: "B10", C: "C0", Tema: "L", RAM: "R2", Hora: "H18" },  // #6 → 25% · 3 vendas · CPV 4
-  { B: "B10", C: "C0", Movimento: "M0", Placement: "PS", Hora: "H07" },  // #7 → 25% · 3 vendas · CPV 4
-  { B: "B10", Tema: "L", RAM: "R2", V: "V1", Hora: "H18" },  // #8 → 25% · 3 vendas · CPV 4
-  { B: "B10", Tema: "L", RAM: "R2", Device: "A", Hora: "H18" },  // #9 → 25% · 3 vendas · CPV 4
-  { B: "B10", Tema: "L", RAM: "R2", Movimento: "M0", Hora: "H18" },  // #10 → 25% · 3 vendas · CPV 4
-  { B: "B10", Tema: "L", RAM: "R2", Browser: "Outros", Hora: "H18" },  // #11 → 25% · 3 vendas · CPV 4
-  { B: "B10", RAM: "R3", Conexao: "W", Placement: "PS", Hora: "H07" },  // #12 → 25% · 3 vendas · CPV 4
-  { B: "B10", RAM: "R3", Rede: "RH", Placement: "PS", Hora: "H07" },  // #13 → 25% · 3 vendas · CPV 4
-  { B: "B10", V: "V1", Movimento: "M0", Placement: "PS", Hora: "H07" },  // #14 → 25% · 3 vendas · CPV 4
-  { B: "B10", Device: "A", Movimento: "M0", Placement: "PS", Hora: "H07" },  // #15 → 25% · 3 vendas · CPV 4
-  { B: "B10", Conexao: "W", Movimento: "M0", Placement: "PS", Hora: "H07" },  // #16 → 25% · 3 vendas · CPV 4
-  { B: "B10", Movimento: "M0", Rede: "RH", Placement: "PS", Hora: "H07" },  // #17 → 25% · 3 vendas · CPV 4
-  { B: "B10", Movimento: "M0", Placement: "PS", Source: "SI", Hora: "H07" },  // #18 → 25% · 3 vendas · CPV 4
-  { B: "B10", Movimento: "M0", Placement: "PS", Browser: "Outros", Hora: "H07" },  // #19 → 25% · 3 vendas · CPV 4
-  { T: "T1", B: "B10", RAM: "R3", Placement: "PS", Hora: "H07" },  // #20 → 23.08% · 3 vendas · CPV 4.3
-  { N: "N8", B: "B10", RAM: "R3", Placement: "PS", Hora: "H07" },  // #21 → 23.08% · 3 vendas · CPV 4.3
-  { B: "B10", C: "C0", RAM: "R3", Placement: "PS", Hora: "H07" },  // #22 → 23.08% · 3 vendas · CPV 4.3
-  { B: "B_absent", Tema: "D", RAM: "R3", Placement: "PF", Hora: "H10" },  // #23 → 23.08% · 3 vendas · CPV 4.3
-  { B: "B10", RAM: "R3", V: "V1", Placement: "PS", Hora: "H07" },  // #24 → 23.08% · 3 vendas · CPV 4.3
-  { B: "B10", RAM: "R3", Device: "A", Placement: "PS", Hora: "H07" },  // #25 → 23.08% · 3 vendas · CPV 4.3
-  { B: "B10", RAM: "R3", Placement: "PS", Source: "SI", Hora: "H07" },  // #26 → 23.08% · 3 vendas · CPV 4.3
-  { B: "B10", RAM: "R3", Placement: "PS", Browser: "Outros", Hora: "H07" },  // #27 → 23.08% · 3 vendas · CPV 4.3
-  { C: "C_absent", Tema: "D", RAM: "R3", Placement: "PF", Hora: "H10" },  // #28 → 23.08% · 3 vendas · CPV 4.3
-  { Tema: "L", Conexao: "M", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #29 → 23.08% · 3 vendas · CPV 4.3
-  { Conexao: "M", Movimento: "M0", Rede: "RC", Source: "SI", Hora: "H00" },  // #30 → 23.08% · 3 vendas · CPV 4.3
-  { Tema: "L", RAM: "R3", Conexao: "M", Rede: "RC", Hora: "H00" },  // #31 → 21.43% · 3 vendas · CPV 4.7
-  { Tema: "L", Conexao: "M", Rede: "RC", Source: "SI", Hora: "H00" },  // #32 → 21.43% · 3 vendas · CPV 4.7
-  { RAM: "R3", Conexao: "M", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #33 → 21.43% · 3 vendas · CPV 4.7
-  { RAM: "R3", Conexao: "M", Rede: "RC", Source: "SI", Hora: "H00" },  // #34 → 21.43% · 3 vendas · CPV 4.7
-  { T: "T1", N: "N8", B: "B10", RAM: "R2", Hora: "H18" },  // #35 → 20% · 3 vendas · CPV 5
-  { T: "T1", N: "N8", Conexao: "M", Placement: "PR", Hora: "H00" },  // #36 → 20% · 2 vendas · CPV 5
-  { T: "T1", B: "B10", C: "C0", RAM: "R2", Hora: "H18" },  // #37 → 20% · 3 vendas · CPV 5
-  { T: "T1", B: "B4", Tema: "L", Movimento: "M0", Hora: "H00" },  // #38 → 20% · 2 vendas · CPV 5
-  { T: "T1", B: "B10", RAM: "R2", V: "V1", Hora: "H18" },  // #39 → 20% · 3 vendas · CPV 5
-  { T: "T1", B: "B10", RAM: "R2", Device: "A", Hora: "H18" },  // #40 → 20% · 3 vendas · CPV 5
-  { T: "T1", B: "B10", RAM: "R2", Movimento: "M0", Hora: "H18" },  // #41 → 20% · 3 vendas · CPV 5
-  { T: "T1", B: "B10", RAM: "R2", Browser: "Outros", Hora: "H18" },  // #42 → 20% · 3 vendas · CPV 5
-  { T: "T1", B: "B_absent", Conexao: "W", Rede: "RC", Hora: "H13" },  // #43 → 20% · 2 vendas · CPV 5
-  { T: "T1", B: "B10", Conexao: "W", Placement: "PS", Hora: "H07" },  // #44 → 20% · 3 vendas · CPV 5
-  { T: "T1", B: "B_absent", Rede: "RC", Placement: "PF", Hora: "H13" },  // #45 → 20% · 2 vendas · CPV 5
-  { T: "T1", B: "B10", Rede: "RH", Placement: "PS", Hora: "H07" },  // #46 → 20% · 3 vendas · CPV 5
-  { T: "T1", C: "C_absent", Conexao: "W", Rede: "RC", Hora: "H13" },  // #47 → 20% · 2 vendas · CPV 5
-  { T: "T1", C: "C_absent", Rede: "RC", Placement: "PF", Hora: "H13" },  // #48 → 20% · 2 vendas · CPV 5
-  { T: "T1", Tema: "L", Conexao: "M", Rede: "RC", Hora: "H00" },  // #49 → 20% · 3 vendas · CPV 5
-  { T: "T1", Tema: "L", Conexao: "M", Placement: "PR", Hora: "H00" },  // #50 → 20% · 2 vendas · CPV 5
-  { T: "T1", RAM: "R3", Conexao: "M", Placement: "PR", Hora: "H00" },  // #51 → 20% · 2 vendas · CPV 5
-  { T: "T1", V: "V1", Conexao: "M", Placement: "PR", Hora: "H00" },  // #52 → 20% · 2 vendas · CPV 5
-  { T: "T1", Device: "A", Conexao: "M", Placement: "PR", Hora: "H00" },  // #53 → 20% · 2 vendas · CPV 5
-  { T: "T1", Conexao: "M", Movimento: "M0", Placement: "PR", Hora: "H00" },  // #54 → 20% · 2 vendas · CPV 5
-  { T: "T1", Conexao: "M", Rede: "RC", Source: "SI", Hora: "H00" },  // #55 → 20% · 3 vendas · CPV 5
-  { T: "T1", Conexao: "M", Placement: "PR", Source: "SI", Hora: "H00" },  // #56 → 20% · 2 vendas · CPV 5
-  { T: "T1", Conexao: "M", Placement: "PR", Browser: "Outros", Hora: "H00" },  // #57 → 20% · 2 vendas · CPV 5
-  { N: "N8", B: "B10", C: "C0", RAM: "R2", Hora: "H18" },  // #58 → 20% · 3 vendas · CPV 5
-  { N: "N8", B: "B4", Tema: "L", Movimento: "M0", Hora: "H00" },  // #59 → 20% · 2 vendas · CPV 5
-  { N: "N8", B: "B10", RAM: "R2", V: "V1", Hora: "H18" },  // #60 → 20% · 3 vendas · CPV 5
-  { N: "N8", B: "B10", RAM: "R2", Device: "A", Hora: "H18" },  // #61 → 20% · 3 vendas · CPV 5
-  { N: "N8", B: "B10", RAM: "R2", Movimento: "M0", Hora: "H18" },  // #62 → 20% · 3 vendas · CPV 5
-  { N: "N8", B: "B10", RAM: "R2", Browser: "Outros", Hora: "H18" },  // #63 → 20% · 3 vendas · CPV 5
-  { N: "N8", B: "B_absent", Conexao: "W", Rede: "RC", Hora: "H13" },  // #64 → 20% · 2 vendas · CPV 5
-  { N: "N8", B: "B10", Conexao: "W", Placement: "PS", Hora: "H07" },  // #65 → 20% · 3 vendas · CPV 5
-  { N: "N8", B: "B_absent", Rede: "RC", Placement: "PF", Hora: "H13" },  // #66 → 20% · 2 vendas · CPV 5
-  { N: "N8", B: "B10", Rede: "RH", Placement: "PS", Hora: "H07" },  // #67 → 20% · 3 vendas · CPV 5
-  { N: "N8", C: "C_absent", Conexao: "W", Rede: "RC", Hora: "H13" },  // #68 → 20% · 2 vendas · CPV 5
-  { N: "N8", C: "C_absent", Rede: "RC", Placement: "PF", Hora: "H13" },  // #69 → 20% · 2 vendas · CPV 5
-  { N: "N8", Tema: "L", Conexao: "M", Rede: "RC", Hora: "H00" },  // #70 → 20% · 3 vendas · CPV 5
-  { N: "N8", Tema: "L", Conexao: "M", Placement: "PR", Hora: "H00" },  // #71 → 20% · 2 vendas · CPV 5
-  { N: "N8", RAM: "R3", Conexao: "M", Placement: "PR", Hora: "H00" },  // #72 → 20% · 2 vendas · CPV 5
-  { N: "N8", V: "V1", Conexao: "M", Placement: "PR", Hora: "H00" },  // #73 → 20% · 2 vendas · CPV 5
-  { N: "N8", Device: "A", Conexao: "M", Placement: "PR", Hora: "H00" },  // #74 → 20% · 2 vendas · CPV 5
-  { N: "N8", Conexao: "M", Movimento: "M0", Placement: "PR", Hora: "H00" },  // #75 → 20% · 2 vendas · CPV 5
-  { N: "N8", Conexao: "M", Rede: "RC", Source: "SI", Hora: "H00" },  // #76 → 20% · 3 vendas · CPV 5
-  { N: "N8", Conexao: "M", Placement: "PR", Source: "SI", Hora: "H00" },  // #77 → 20% · 2 vendas · CPV 5
-  { N: "N8", Conexao: "M", Placement: "PR", Browser: "Outros", Hora: "H00" },  // #78 → 20% · 2 vendas · CPV 5
-  { B: "B4", C: "C0", Tema: "L", Movimento: "M0", Hora: "H00" },  // #79 → 20% · 2 vendas · CPV 5
-  { B: "B10", C: "C0", RAM: "R2", V: "V1", Hora: "H18" },  // #80 → 20% · 3 vendas · CPV 5
-  { B: "B10", C: "C0", RAM: "R2", Device: "A", Hora: "H18" },  // #81 → 20% · 3 vendas · CPV 5
-  { B: "B10", C: "C0", RAM: "R2", Movimento: "M0", Hora: "H18" },  // #82 → 20% · 3 vendas · CPV 5
-  { B: "B10", C: "C0", RAM: "R2", Browser: "Outros", Hora: "H18" },  // #83 → 20% · 3 vendas · CPV 5
-  { B: "B_absent", C: "C_absent", Conexao: "W", Rede: "RC", Hora: "H13" },  // #84 → 20% · 2 vendas · CPV 5
-  { B: "B10", C: "C0", Conexao: "W", Placement: "PS", Hora: "H07" },  // #85 → 20% · 3 vendas · CPV 5
-  { B: "B_absent", C: "C_absent", Rede: "RC", Placement: "PF", Hora: "H13" },  // #86 → 20% · 2 vendas · CPV 5
-  { B: "B10", C: "C0", Rede: "RH", Placement: "PS", Hora: "H07" },  // #87 → 20% · 3 vendas · CPV 5
-  { B: "B7", Tema: "D", RAM: "R2", Placement: "PF", Hora: "H13" },  // #88 → 20% · 3 vendas · CPV 5
-  { B: "B4", Tema: "L", V: "V1", Movimento: "M0", Hora: "H00" },  // #89 → 20% · 2 vendas · CPV 5
-  { B: "B4", Tema: "L", Device: "A", Movimento: "M0", Hora: "H00" },  // #90 → 20% · 2 vendas · CPV 5
-  { B: "B4", Tema: "L", Movimento: "M0", Source: "SI", Hora: "H00" },  // #91 → 20% · 2 vendas · CPV 5
-  { B: "B4", Tema: "L", Movimento: "M0", Browser: "Outros", Hora: "H00" },  // #92 → 20% · 2 vendas · CPV 5
-  { B: "B10", RAM: "R2", V: "V1", Device: "A", Hora: "H18" },  // #93 → 20% · 3 vendas · CPV 5
-  { B: "B10", RAM: "R2", V: "V1", Movimento: "M0", Hora: "H18" },  // #94 → 20% · 3 vendas · CPV 5
-  { B: "B10", RAM: "R2", V: "V1", Browser: "Outros", Hora: "H18" },  // #95 → 20% · 3 vendas · CPV 5
-  { B: "B10", RAM: "R2", Device: "A", Movimento: "M0", Hora: "H18" },  // #96 → 20% · 3 vendas · CPV 5
-  { B: "B10", RAM: "R2", Device: "A", Browser: "Outros", Hora: "H18" },  // #97 → 20% · 3 vendas · CPV 5
-  { B: "B_absent", RAM: "R3", Conexao: "M", Rede: "RC", Hora: "H16" },  // #98 → 20% · 2 vendas · CPV 5
-  { B: "B10", RAM: "R2", Movimento: "M0", Browser: "Outros", Hora: "H18" },  // #99 → 20% · 3 vendas · CPV 5
-  { B: "B_absent", V: "V1", Conexao: "W", Rede: "RC", Hora: "H13" },  // #100 → 20% · 2 vendas · CPV 5
-  { B: "B10", V: "V1", Conexao: "W", Placement: "PS", Hora: "H07" },  // #101 → 20% · 3 vendas · CPV 5
-  { B: "B_absent", V: "V1", Rede: "RC", Placement: "PF", Hora: "H13" },  // #102 → 20% · 2 vendas · CPV 5
-  { B: "B10", V: "V1", Rede: "RH", Placement: "PS", Hora: "H07" },  // #103 → 20% · 3 vendas · CPV 5
-  { B: "B_absent", Device: "A", Conexao: "W", Rede: "RC", Hora: "H13" },  // #104 → 20% · 2 vendas · CPV 5
-  { B: "B10", Device: "A", Conexao: "W", Placement: "PS", Hora: "H07" },  // #105 → 20% · 3 vendas · CPV 5
-  { B: "B_absent", Device: "A", Rede: "RC", Placement: "PF", Hora: "H13" },  // #106 → 20% · 2 vendas · CPV 5
-  { B: "B10", Device: "A", Rede: "RH", Placement: "PS", Hora: "H07" },  // #107 → 20% · 3 vendas · CPV 5
-  { B: "B_absent", Conexao: "W", Movimento: "M0", Rede: "RC", Hora: "H13" },  // #108 → 20% · 2 vendas · CPV 5
-  { B: "B10", Conexao: "W", Rede: "RH", Placement: "PS", Hora: "H07" },  // #109 → 20% · 3 vendas · CPV 5
-  { B: "B_absent", Conexao: "W", Rede: "RC", Source: "SI", Hora: "H13" },  // #110 → 20% · 2 vendas · CPV 5
-  { B: "B_absent", Conexao: "W", Rede: "RC", Browser: "Outros", Hora: "H13" },  // #111 → 20% · 2 vendas · CPV 5
-  { B: "B10", Conexao: "W", Placement: "PS", Source: "SI", Hora: "H07" },  // #112 → 20% · 3 vendas · CPV 5
-  { B: "B10", Conexao: "W", Placement: "PS", Browser: "Outros", Hora: "H07" },  // #113 → 20% · 3 vendas · CPV 5
-  { B: "B_absent", Movimento: "M0", Rede: "RC", Placement: "PF", Hora: "H13" },  // #114 → 20% · 2 vendas · CPV 5
-  { B: "B_absent", Rede: "RC", Placement: "PF", Source: "SI", Hora: "H13" },  // #115 → 20% · 2 vendas · CPV 5
-  { B: "B10", Rede: "RH", Placement: "PS", Source: "SI", Hora: "H07" },  // #116 → 20% · 3 vendas · CPV 5
-  { B: "B_absent", Rede: "RC", Placement: "PF", Browser: "Outros", Hora: "H13" },  // #117 → 20% · 2 vendas · CPV 5
-  { B: "B10", Rede: "RH", Placement: "PS", Browser: "Outros", Hora: "H07" },  // #118 → 20% · 3 vendas · CPV 5
-  { C: "C_absent", RAM: "R3", Conexao: "M", Rede: "RC", Hora: "H16" },  // #119 → 20% · 2 vendas · CPV 5
-  { C: "C_absent", V: "V1", Conexao: "W", Rede: "RC", Hora: "H13" },  // #120 → 20% · 2 vendas · CPV 5
-  { C: "C_absent", V: "V1", Rede: "RC", Placement: "PF", Hora: "H13" },  // #121 → 20% · 2 vendas · CPV 5
-  { C: "C_absent", Device: "A", Conexao: "W", Rede: "RC", Hora: "H13" },  // #122 → 20% · 2 vendas · CPV 5
-  { C: "C_absent", Device: "A", Rede: "RC", Placement: "PF", Hora: "H13" },  // #123 → 20% · 2 vendas · CPV 5
-  { C: "C_absent", Conexao: "W", Movimento: "M0", Rede: "RC", Hora: "H13" },  // #124 → 20% · 2 vendas · CPV 5
-  { C: "C_absent", Conexao: "W", Rede: "RC", Source: "SI", Hora: "H13" },  // #125 → 20% · 2 vendas · CPV 5
-  { C: "C_absent", Conexao: "W", Rede: "RC", Browser: "Outros", Hora: "H13" },  // #126 → 20% · 2 vendas · CPV 5
-  { C: "C_absent", Movimento: "M0", Rede: "RC", Placement: "PF", Hora: "H13" },  // #127 → 20% · 2 vendas · CPV 5
-  { C: "C_absent", Rede: "RC", Placement: "PF", Source: "SI", Hora: "H13" },  // #128 → 20% · 2 vendas · CPV 5
-  { C: "C_absent", Rede: "RC", Placement: "PF", Browser: "Outros", Hora: "H13" },  // #129 → 20% · 2 vendas · CPV 5
-  { Tema: "L", RAM: "R3", Conexao: "M", Placement: "PR", Hora: "H00" },  // #130 → 20% · 2 vendas · CPV 5
-  { Tema: "D", RAM: "R3", Rede: "RH", Source: "SI", Hora: "H03" },  // #131 → 20% · 2 vendas · CPV 5
-  { Tema: "L", V: "V1", Conexao: "M", Rede: "RC", Hora: "H00" },  // #132 → 20% · 3 vendas · CPV 5
-  { Tema: "L", V: "V1", Conexao: "M", Placement: "PR", Hora: "H00" },  // #133 → 20% · 2 vendas · CPV 5
-  { Tema: "L", Device: "A", Conexao: "M", Rede: "RC", Hora: "H00" },  // #134 → 20% · 3 vendas · CPV 5
-  { Tema: "L", Device: "A", Conexao: "M", Placement: "PR", Hora: "H00" },  // #135 → 20% · 2 vendas · CPV 5
-  { Tema: "L", Conexao: "M", Movimento: "M0", Placement: "PR", Hora: "H00" },  // #136 → 20% · 2 vendas · CPV 5
-  { Tema: "L", Conexao: "M", Rede: "RC", Browser: "Outros", Hora: "H00" },  // #137 → 20% · 3 vendas · CPV 5
-  { Tema: "L", Conexao: "M", Placement: "PR", Source: "SI", Hora: "H00" },  // #138 → 20% · 2 vendas · CPV 5
-  { Tema: "L", Conexao: "M", Placement: "PR", Browser: "Outros", Hora: "H00" },  // #139 → 20% · 2 vendas · CPV 5
-  { Tema: "L", Movimento: "M0", Rede: "RC", Source: "SI", Hora: "H00" },  // #140 → 20% · 3 vendas · CPV 5
-  { RAM: "R3", V: "V1", Conexao: "M", Placement: "PR", Hora: "H00" },  // #141 → 20% · 2 vendas · CPV 5
-  { RAM: "R3", Device: "A", Conexao: "M", Placement: "PR", Hora: "H00" },  // #142 → 20% · 2 vendas · CPV 5
-  { RAM: "R3", Conexao: "M", Movimento: "M0", Placement: "PR", Hora: "H00" },  // #143 → 20% · 2 vendas · CPV 5
-  { RAM: "R2", Conexao: "M", Rede: "RC", Placement: "PS", Hora: "H12" },  // #144 → 20% · 2 vendas · CPV 5
-  { RAM: "R3", Conexao: "M", Placement: "PR", Source: "SI", Hora: "H00" },  // #145 → 20% · 2 vendas · CPV 5
-  { RAM: "R3", Conexao: "M", Placement: "PR", Browser: "Outros", Hora: "H00" },  // #146 → 20% · 2 vendas · CPV 5
-  { V: "V1", Device: "A", Conexao: "M", Placement: "PR", Hora: "H00" },  // #147 → 20% · 2 vendas · CPV 5
-  { V: "V1", Conexao: "M", Movimento: "M0", Placement: "PR", Hora: "H00" },  // #148 → 20% · 2 vendas · CPV 5
-  { V: "V1", Conexao: "M", Rede: "RC", Source: "SI", Hora: "H00" },  // #149 → 20% · 3 vendas · CPV 5
-  { V: "V1", Conexao: "M", Placement: "PR", Source: "SI", Hora: "H00" },  // #150 → 20% · 2 vendas · CPV 5
-  { V: "V1", Conexao: "M", Placement: "PR", Browser: "Outros", Hora: "H00" },  // #151 → 20% · 2 vendas · CPV 5
-  { Device: "A", Conexao: "M", Movimento: "M0", Placement: "PR", Hora: "H00" },  // #152 → 20% · 2 vendas · CPV 5
-  { Device: "A", Conexao: "M", Rede: "RC", Source: "SI", Hora: "H00" },  // #153 → 20% · 3 vendas · CPV 5
-  { Device: "A", Conexao: "M", Placement: "PR", Source: "SI", Hora: "H00" },  // #154 → 20% · 2 vendas · CPV 5
-  { Device: "A", Conexao: "M", Placement: "PR", Browser: "Outros", Hora: "H00" },  // #155 → 20% · 2 vendas · CPV 5
-  { Conexao: "M", Movimento: "M0", Placement: "PR", Source: "SI", Hora: "H00" },  // #156 → 20% · 2 vendas · CPV 5
-  { Conexao: "M", Movimento: "M0", Placement: "PR", Browser: "Outros", Hora: "H00" },  // #157 → 20% · 2 vendas · CPV 5
-  { Conexao: "M", Rede: "RC", Source: "SI", Browser: "Outros", Hora: "H00" },  // #158 → 20% · 3 vendas · CPV 5
-  { Conexao: "M", Placement: "PR", Source: "SI", Browser: "Outros", Hora: "H00" },  // #159 → 20% · 2 vendas · CPV 5
-  { T: "T1", N: "N8", B: "B10", Placement: "PS", Hora: "H07" },  // #160 → 18.75% · 3 vendas · CPV 5.3
-  { T: "T1", B: "B10", C: "C0", Placement: "PS", Hora: "H07" },  // #161 → 18.75% · 3 vendas · CPV 5.3
-  { T: "T1", B: "B10", V: "V1", Placement: "PS", Hora: "H07" },  // #162 → 18.75% · 3 vendas · CPV 5.3
-  { T: "T1", B: "B10", Device: "A", Placement: "PS", Hora: "H07" },  // #163 → 18.75% · 3 vendas · CPV 5.3
-  { T: "T1", B: "B10", Placement: "PS", Source: "SI", Hora: "H07" },  // #164 → 18.75% · 3 vendas · CPV 5.3
-  { T: "T1", B: "B10", Placement: "PS", Browser: "Outros", Hora: "H07" },  // #165 → 18.75% · 3 vendas · CPV 5.3
-  { T: "T1", RAM: "R3", Conexao: "M", Rede: "RC", Hora: "H00" },  // #166 → 18.75% · 3 vendas · CPV 5.3
-  { N: "N8", B: "B10", C: "C0", Placement: "PS", Hora: "H07" },  // #167 → 18.75% · 3 vendas · CPV 5.3
-  { N: "N8", B: "B10", V: "V1", Placement: "PS", Hora: "H07" },  // #168 → 18.75% · 3 vendas · CPV 5.3
-  { N: "N8", B: "B10", Device: "A", Placement: "PS", Hora: "H07" },  // #169 → 18.75% · 3 vendas · CPV 5.3
-  { N: "N8", B: "B10", Placement: "PS", Source: "SI", Hora: "H07" },  // #170 → 18.75% · 3 vendas · CPV 5.3
-  { N: "N8", B: "B10", Placement: "PS", Browser: "Outros", Hora: "H07" },  // #171 → 18.75% · 3 vendas · CPV 5.3
-  { N: "N8", RAM: "R3", Conexao: "M", Rede: "RC", Hora: "H00" },  // #172 → 18.75% · 3 vendas · CPV 5.3
-  { B: "B10", C: "C0", V: "V1", Placement: "PS", Hora: "H07" },  // #173 → 18.75% · 3 vendas · CPV 5.3
-  { B: "B10", C: "C0", Device: "A", Placement: "PS", Hora: "H07" },  // #174 → 18.75% · 3 vendas · CPV 5.3
-  { B: "B10", C: "C0", Placement: "PS", Source: "SI", Hora: "H07" },  // #175 → 18.75% · 3 vendas · CPV 5.3
-  { B: "B10", C: "C0", Placement: "PS", Browser: "Outros", Hora: "H07" },  // #176 → 18.75% · 3 vendas · CPV 5.3
-  { B: "B7", Tema: "D", RAM: "R2", Source: "SI", Hora: "H13" },  // #177 → 18.75% · 3 vendas · CPV 5.3
-  { B: "B10", V: "V1", Device: "A", Placement: "PS", Hora: "H07" },  // #178 → 18.75% · 3 vendas · CPV 5.3
-  { B: "B10", V: "V1", Placement: "PS", Source: "SI", Hora: "H07" },  // #179 → 18.75% · 3 vendas · CPV 5.3
-  { B: "B10", V: "V1", Placement: "PS", Browser: "Outros", Hora: "H07" },  // #180 → 18.75% · 3 vendas · CPV 5.3
-  { B: "B10", Device: "A", Placement: "PS", Source: "SI", Hora: "H07" },  // #181 → 18.75% · 3 vendas · CPV 5.3
-  { B: "B10", Device: "A", Placement: "PS", Browser: "Outros", Hora: "H07" },  // #182 → 18.75% · 3 vendas · CPV 5.3
-  { B: "B10", Placement: "PS", Source: "SI", Browser: "Outros", Hora: "H07" },  // #183 → 18.75% · 3 vendas · CPV 5.3
-  { Tema: "L", RAM: "R3", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #184 → 18.75% · 3 vendas · CPV 5.3
-  { Tema: "L", RAM: "R3", Rede: "RC", Source: "SI", Hora: "H00" },  // #185 → 18.75% · 3 vendas · CPV 5.3
-  { Tema: "L", Conexao: "M", Movimento: "M0", Source: "SI", Hora: "H00" },  // #186 → 18.75% · 3 vendas · CPV 5.3
-  { RAM: "R3", V: "V1", Conexao: "M", Rede: "RC", Hora: "H00" },  // #187 → 18.75% · 3 vendas · CPV 5.3
-  { RAM: "R3", Device: "A", Conexao: "M", Rede: "RC", Hora: "H00" },  // #188 → 18.75% · 3 vendas · CPV 5.3
-  { RAM: "R3", Conexao: "M", Rede: "RC", Browser: "Outros", Hora: "H00" },  // #189 → 18.75% · 3 vendas · CPV 5.3
-  { T: "T1", N: "N6", B: "B10", RAM: "R3", Conexao: "W" },  // #190 → 18.18% · 2 vendas · CPV 5.5
-  { T: "T1", N: "N8", C: "C1", Tema: "L", Hora: "H00" },  // #191 → 18.18% · 2 vendas · CPV 5.5
-  { T: "T1", B: "B_absent", Tema: "D", RAM: "R1", Hora: "H09" },  // #192 → 18.18% · 2 vendas · CPV 5.5
-  { T: "T1", B: "B4", Tema: "D", Rede: "RC", Placement: "PS" },  // #193 → 18.18% · 2 vendas · CPV 5.5
-  { T: "T1", C: "C_absent", Tema: "D", RAM: "R1", Hora: "H09" },  // #194 → 18.18% · 2 vendas · CPV 5.5
-  { T: "T1", C: "C1", Tema: "L", V: "V1", Hora: "H00" },  // #195 → 18.18% · 2 vendas · CPV 5.5
-  { T: "T1", C: "C1", Tema: "L", Device: "A", Hora: "H00" },  // #196 → 18.18% · 2 vendas · CPV 5.5
-  { T: "T1", C: "C1", Tema: "L", Movimento: "M0", Hora: "H00" },  // #197 → 18.18% · 2 vendas · CPV 5.5
-  { T: "T1", C: "C1", Tema: "L", Browser: "Outros", Hora: "H00" },  // #198 → 18.18% · 2 vendas · CPV 5.5
-  { T: "T1", C: "C1", RAM: "R3", Movimento: "M0", Hora: "H00" },  // #199 → 18.18% · 2 vendas · CPV 5.5
-  { N: "N6", B: "B10", C: "C0", RAM: "R3", Conexao: "W" },  // #200 → 18.18% · 2 vendas · CPV 5.5
-  { N: "N8", B: "B4", Tema: "D", Rede: "RC", Placement: "PS" },  // #201 → 18.18% · 2 vendas · CPV 5.5
-  { N: "N6", B: "B10", RAM: "R3", V: "V1", Conexao: "W" },  // #202 → 18.18% · 2 vendas · CPV 5.5
-  { N: "N6", B: "B10", RAM: "R3", Device: "A", Conexao: "W" },  // #203 → 18.18% · 2 vendas · CPV 5.5
-  { N: "N6", B: "B10", RAM: "R3", Conexao: "W", Browser: "Outros" },  // #204 → 18.18% · 2 vendas · CPV 5.5
-  { N: "N8", C: "C1", Tema: "L", V: "V1", Hora: "H00" },  // #205 → 18.18% · 2 vendas · CPV 5.5
-  { N: "N8", C: "C1", Tema: "L", Device: "A", Hora: "H00" },  // #206 → 18.18% · 2 vendas · CPV 5.5
-  { N: "N8", C: "C1", Tema: "L", Movimento: "M0", Hora: "H00" },  // #207 → 18.18% · 2 vendas · CPV 5.5
-  { N: "N8", C: "C1", Tema: "L", Browser: "Outros", Hora: "H00" },  // #208 → 18.18% · 2 vendas · CPV 5.5
-  { N: "N8", C: "C1", RAM: "R3", Movimento: "M0", Hora: "H00" },  // #209 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B_absent", C: "C_absent", Tema: "D", RAM: "R1", Hora: "H09" },  // #210 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B4", C: "C0", Tema: "D", Rede: "RC", Placement: "PS" },  // #211 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B10", Tema: "L", RAM: "R2", Rede: "RH", Hora: "H09" },  // #212 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B10", Tema: "L", RAM: "R2", Source: "SI", Hora: "H09" },  // #213 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B10", Tema: "L", RAM: "R2", Source: "SI", Hora: "H18" },  // #214 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B_absent", Tema: "D", RAM: "R1", Browser: "Outros", Hora: "H09" },  // #215 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B4", Tema: "D", V: "V1", Rede: "RC", Placement: "PS" },  // #216 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B4", Tema: "D", Device: "A", Rede: "RC", Placement: "PS" },  // #217 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B10", Tema: "L", Conexao: "W", Placement: "PF", Hora: "H18" },  // #218 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B7", Tema: "D", Conexao: "W", Placement: "PF", Hora: "H13" },  // #219 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B4", Tema: "D", Movimento: "M0", Rede: "RC", Placement: "PS" },  // #220 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B4", Tema: "D", Rede: "RC", Placement: "PS", Source: "SI" },  // #221 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B4", Tema: "D", Rede: "RC", Placement: "PS", Browser: "Outros" },  // #222 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B10", Tema: "L", Rede: "RH", Placement: "PF", Hora: "H18" },  // #223 → 18.18% · 2 vendas · CPV 5.5
-  { B: "B7", RAM: "R2", Rede: "RH", Placement: "PF", Hora: "H13" },  // #224 → 18.18% · 2 vendas · CPV 5.5
-  { C: "C_absent", Tema: "D", RAM: "R1", Browser: "Outros", Hora: "H09" },  // #225 → 18.18% · 2 vendas · CPV 5.5
-  { C: "C1", Tema: "L", V: "V1", Device: "A", Hora: "H00" },  // #226 → 18.18% · 2 vendas · CPV 5.5
-  { C: "C1", Tema: "L", V: "V1", Movimento: "M0", Hora: "H00" },  // #227 → 18.18% · 2 vendas · CPV 5.5
-  { C: "C1", Tema: "L", V: "V1", Browser: "Outros", Hora: "H00" },  // #228 → 18.18% · 2 vendas · CPV 5.5
-  { C: "C1", Tema: "L", Device: "A", Movimento: "M0", Hora: "H00" },  // #229 → 18.18% · 2 vendas · CPV 5.5
-  { C: "C1", Tema: "L", Device: "A", Browser: "Outros", Hora: "H00" },  // #230 → 18.18% · 2 vendas · CPV 5.5
-  { C: "C1", Tema: "L", Movimento: "M0", Browser: "Outros", Hora: "H00" },  // #231 → 18.18% · 2 vendas · CPV 5.5
-  { C: "C1", RAM: "R3", V: "V1", Movimento: "M0", Hora: "H00" },  // #232 → 18.18% · 2 vendas · CPV 5.5
-  { C: "C1", RAM: "R3", Device: "A", Movimento: "M0", Hora: "H00" },  // #233 → 18.18% · 2 vendas · CPV 5.5
-  { C: "C1", RAM: "R3", Movimento: "M0", Browser: "Outros", Hora: "H00" },  // #234 → 18.18% · 2 vendas · CPV 5.5
-  { C: "C0", RAM: "R2", Rede: "RU", Placement: "PF", Hora: "H13" },  // #235 → 18.18% · 2 vendas · CPV 5.5
-  { Tema: "L", Conexao: "M", Rede: "RC", Placement: "PS", Hora: "H12" },  // #236 → 18.18% · 2 vendas · CPV 5.5
-  { T: "T1", Tema: "L", Rede: "RC", Source: "SI", Hora: "H00" },  // #237 → 17.65% · 3 vendas · CPV 5.7
-  { N: "N8", Tema: "L", Rede: "RC", Source: "SI", Hora: "H00" },  // #238 → 17.65% · 3 vendas · CPV 5.7
-  { Tema: "L", RAM: "R3", Conexao: "M", Source: "SI", Hora: "H00" },  // #239 → 17.65% · 3 vendas · CPV 5.7
-  { Tema: "L", V: "V1", Rede: "RC", Source: "SI", Hora: "H00" },  // #240 → 17.65% · 3 vendas · CPV 5.7
-  { Tema: "L", Device: "A", Rede: "RC", Source: "SI", Hora: "H00" },  // #241 → 17.65% · 3 vendas · CPV 5.7
-  { Tema: "L", Rede: "RC", Source: "SI", Browser: "Outros", Hora: "H00" },  // #242 → 17.65% · 3 vendas · CPV 5.7
-  { RAM: "R3", Movimento: "M0", Rede: "RC", Source: "SI", Hora: "H00" },  // #243 → 17.65% · 3 vendas · CPV 5.7
-  { B: "B_absent", RAM: "R3", Movimento: "M0", Placement: "PF", Hora: "H10" },  // #244 → 17.24% · 5 vendas · CPV 5.8
-  { C: "C_absent", RAM: "R3", Movimento: "M0", Placement: "PF", Hora: "H10" },  // #245 → 17.24% · 5 vendas · CPV 5.8
-  { T: "T1", N: "N8", B: "B4", Tema: "L", Hora: "H00" },  // #246 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", N: "N8", B: "B4", RAM: "R3", Hora: "H00" },  // #247 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", N: "N8", B: "B2", Conexao: "M", Placement: "PR" },  // #248 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", N: "N8", C: "C1", RAM: "R3", Hora: "H00" },  // #249 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B4", C: "C0", Tema: "L", Hora: "H00" },  // #250 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B4", C: "C0", RAM: "R3", Hora: "H00" },  // #251 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B4", Tema: "L", V: "V1", Hora: "H00" },  // #252 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B4", Tema: "L", Device: "A", Hora: "H00" },  // #253 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B4", Tema: "L", Source: "SI", Hora: "H00" },  // #254 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B4", Tema: "L", Browser: "Outros", Hora: "H00" },  // #255 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B4", RAM: "R3", V: "V1", Hora: "H00" },  // #256 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B4", RAM: "R3", Device: "A", Hora: "H00" },  // #257 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B10", RAM: "R2", Conexao: "W", Hora: "H18" },  // #258 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B10", RAM: "R2", Rede: "RH", Hora: "H18" },  // #259 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B4", RAM: "R3", Source: "SI", Hora: "H00" },  // #260 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B4", RAM: "R3", Browser: "Outros", Hora: "H00" },  // #261 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B2", V: "V1", Conexao: "M", Placement: "PR" },  // #262 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B2", Device: "A", Conexao: "M", Placement: "PR" },  // #263 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B2", Conexao: "M", Movimento: "M0", Placement: "PR" },  // #264 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B2", Conexao: "M", Placement: "PR", Source: "SI" },  // #265 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B2", Conexao: "M", Placement: "PR", Browser: "Outros" },  // #266 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", C: "C1", RAM: "R3", V: "V1", Hora: "H00" },  // #267 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", C: "C1", RAM: "R3", Device: "A", Hora: "H00" },  // #268 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", C: "C1", RAM: "R3", Browser: "Outros", Hora: "H00" },  // #269 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", Tema: "L", RAM: "R3", Rede: "RC", Hora: "H00" },  // #270 → 16.67% · 3 vendas · CPV 6
-  { T: "T1", Tema: "L", Conexao: "M", Source: "SI", Hora: "H00" },  // #271 → 16.67% · 3 vendas · CPV 6
-  { N: "N8", B: "B4", C: "C0", Tema: "L", Hora: "H00" },  // #272 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B4", C: "C0", RAM: "R3", Hora: "H00" },  // #273 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B4", Tema: "L", V: "V1", Hora: "H00" },  // #274 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B4", Tema: "L", Device: "A", Hora: "H00" },  // #275 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B4", Tema: "L", Source: "SI", Hora: "H00" },  // #276 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B4", Tema: "L", Browser: "Outros", Hora: "H00" },  // #277 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B4", RAM: "R3", V: "V1", Hora: "H00" },  // #278 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B4", RAM: "R3", Device: "A", Hora: "H00" },  // #279 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B10", RAM: "R2", Conexao: "W", Hora: "H18" },  // #280 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B10", RAM: "R2", Rede: "RH", Hora: "H18" },  // #281 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B4", RAM: "R3", Source: "SI", Hora: "H00" },  // #282 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B4", RAM: "R3", Browser: "Outros", Hora: "H00" },  // #283 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B2", V: "V1", Conexao: "M", Placement: "PR" },  // #284 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B2", Device: "A", Conexao: "M", Placement: "PR" },  // #285 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B2", Conexao: "M", Movimento: "M0", Placement: "PR" },  // #286 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B2", Conexao: "M", Placement: "PR", Source: "SI" },  // #287 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", B: "B2", Conexao: "M", Placement: "PR", Browser: "Outros" },  // #288 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", C: "C1", RAM: "R3", V: "V1", Hora: "H00" },  // #289 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", C: "C1", RAM: "R3", Device: "A", Hora: "H00" },  // #290 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", C: "C1", RAM: "R3", Browser: "Outros", Hora: "H00" },  // #291 → 16.67% · 2 vendas · CPV 6
-  { N: "N8", Tema: "L", RAM: "R3", Rede: "RC", Hora: "H00" },  // #292 → 16.67% · 3 vendas · CPV 6
-  { N: "N8", Tema: "L", Conexao: "M", Source: "SI", Hora: "H00" },  // #293 → 16.67% · 3 vendas · CPV 6
-  { B: "B4", C: "C0", Tema: "L", V: "V1", Hora: "H00" },  // #294 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", C: "C0", Tema: "L", Device: "A", Hora: "H00" },  // #295 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", C: "C0", Tema: "D", Conexao: "M", Placement: "PS" },  // #296 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", C: "C0", Tema: "L", Placement: "PF", Hora: "H18" },  // #297 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", C: "C0", Tema: "L", Source: "SI", Hora: "H00" },  // #298 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", C: "C0", Tema: "L", Browser: "Outros", Hora: "H00" },  // #299 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", C: "C0", RAM: "R3", V: "V1", Hora: "H00" },  // #300 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", C: "C0", RAM: "R3", Device: "A", Hora: "H00" },  // #301 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", C: "C0", RAM: "R2", Conexao: "W", Hora: "H18" },  // #302 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", C: "C0", RAM: "R2", Rede: "RH", Hora: "H18" },  // #303 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", C: "C0", RAM: "R3", Source: "SI", Hora: "H00" },  // #304 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", C: "C0", RAM: "R3", Browser: "Outros", Hora: "H00" },  // #305 → 16.67% · 2 vendas · CPV 6
-  { B: "B7", Tema: "D", RAM: "R2", Conexao: "W", Hora: "H13" },  // #306 → 16.67% · 2 vendas · CPV 6
-  { B: "B8", Tema: "L", RAM: "R3", Movimento: "M0", Hora: "H08" },  // #307 → 16.67% · 2 vendas · CPV 6
-  { B: "B2", Tema: "D", RAM: "R3", Source: "SI", Hora: "H17" },  // #308 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", Tema: "L", V: "V1", Device: "A", Hora: "H00" },  // #309 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", Tema: "L", V: "V1", Source: "SI", Hora: "H00" },  // #310 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", Tema: "L", V: "V1", Browser: "Outros", Hora: "H00" },  // #311 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", Tema: "L", Device: "A", Source: "SI", Hora: "H00" },  // #312 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", Tema: "L", Device: "A", Browser: "Outros", Hora: "H00" },  // #313 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", Tema: "L", Source: "SI", Browser: "Outros", Hora: "H00" },  // #314 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", RAM: "R3", V: "V1", Device: "A", Hora: "H00" },  // #315 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", RAM: "R2", V: "V1", Conexao: "W", Hora: "H18" },  // #316 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", RAM: "R2", V: "V1", Rede: "RH", Hora: "H18" },  // #317 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", RAM: "R3", V: "V1", Source: "SI", Hora: "H00" },  // #318 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", RAM: "R3", V: "V1", Browser: "Outros", Hora: "H00" },  // #319 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", RAM: "R2", Device: "A", Conexao: "W", Hora: "H18" },  // #320 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", RAM: "R2", Device: "A", Rede: "RH", Hora: "H18" },  // #321 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", RAM: "R3", Device: "A", Source: "SI", Hora: "H00" },  // #322 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", RAM: "R3", Device: "A", Browser: "Outros", Hora: "H00" },  // #323 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", RAM: "R2", Conexao: "W", Movimento: "M0", Hora: "H18" },  // #324 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", RAM: "R2", Conexao: "W", Rede: "RH", Hora: "H18" },  // #325 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", RAM: "R2", Conexao: "W", Source: "SI", Hora: "H09" },  // #326 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", RAM: "R2", Conexao: "W", Source: "SI", Hora: "H18" },  // #327 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", RAM: "R2", Conexao: "W", Browser: "Outros", Hora: "H18" },  // #328 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", RAM: "R2", Movimento: "M0", Rede: "RH", Hora: "H18" },  // #329 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", RAM: "R2", Rede: "RH", Source: "SI", Hora: "H09" },  // #330 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", RAM: "R2", Rede: "RH", Source: "SI", Hora: "H18" },  // #331 → 16.67% · 2 vendas · CPV 6
-  { B: "B10", RAM: "R2", Rede: "RH", Browser: "Outros", Hora: "H18" },  // #332 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", RAM: "R3", Source: "SI", Browser: "Outros", Hora: "H00" },  // #333 → 16.67% · 2 vendas · CPV 6
-  { B: "B2", V: "V1", Device: "A", Conexao: "M", Placement: "PR" },  // #334 → 16.67% · 2 vendas · CPV 6
-  { B: "B2", V: "V1", Conexao: "M", Movimento: "M0", Placement: "PR" },  // #335 → 16.67% · 2 vendas · CPV 6
-  { B: "B2", V: "V1", Conexao: "M", Placement: "PR", Source: "SI" },  // #336 → 16.67% · 2 vendas · CPV 6
-  { B: "B2", V: "V1", Conexao: "M", Placement: "PR", Browser: "Outros" },  // #337 → 16.67% · 2 vendas · CPV 6
-  { B: "B2", Device: "A", Conexao: "M", Movimento: "M0", Placement: "PR" },  // #338 → 16.67% · 2 vendas · CPV 6
-  { B: "B2", Device: "A", Conexao: "M", Placement: "PR", Source: "SI" },  // #339 → 16.67% · 2 vendas · CPV 6
-  { B: "B2", Device: "A", Conexao: "M", Placement: "PR", Browser: "Outros" },  // #340 → 16.67% · 2 vendas · CPV 6
-  { B: "B4", Conexao: "M", Movimento: "M0", Rede: "RC", Placement: "PS" },  // #341 → 16.67% · 3 vendas · CPV 6
-  { B: "B2", Conexao: "M", Movimento: "M0", Placement: "PR", Source: "SI" },  // #342 → 16.67% · 2 vendas · CPV 6
-  { B: "B2", Conexao: "M", Movimento: "M0", Placement: "PR", Browser: "Outros" },  // #343 → 16.67% · 2 vendas · CPV 6
-  { B: "B2", Conexao: "M", Placement: "PR", Source: "SI", Browser: "Outros" },  // #344 → 16.67% · 2 vendas · CPV 6
-  { C: "C1", RAM: "R3", V: "V1", Device: "A", Hora: "H00" },  // #345 → 16.67% · 2 vendas · CPV 6
-  { C: "C1", RAM: "R3", V: "V1", Browser: "Outros", Hora: "H00" },  // #346 → 16.67% · 2 vendas · CPV 6
-  { C: "C1", RAM: "R3", Device: "A", Browser: "Outros", Hora: "H00" },  // #347 → 16.67% · 2 vendas · CPV 6
-  { C: "C0", Conexao: "M", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #348 → 16.67% · 2 vendas · CPV 6
-  { C: "C0", Conexao: "M", Rede: "RC", Source: "SI", Hora: "H00" },  // #349 → 16.67% · 2 vendas · CPV 6
-  { Tema: "L", RAM: "R3", V: "V1", Rede: "RC", Hora: "H00" },  // #350 → 16.67% · 3 vendas · CPV 6
-  { Tema: "L", RAM: "R3", Device: "A", Rede: "RC", Hora: "H00" },  // #351 → 16.67% · 3 vendas · CPV 6
-  { Tema: "L", RAM: "R3", Conexao: "M", Movimento: "M0", Hora: "H00" },  // #352 → 16.67% · 3 vendas · CPV 6
-  { Tema: "L", RAM: "R3", Rede: "RC", Browser: "Outros", Hora: "H00" },  // #353 → 16.67% · 3 vendas · CPV 6
-  { Tema: "L", V: "V1", Conexao: "M", Source: "SI", Hora: "H00" },  // #354 → 16.67% · 3 vendas · CPV 6
-  { Tema: "L", Device: "A", Conexao: "M", Source: "SI", Hora: "H00" },  // #355 → 16.67% · 3 vendas · CPV 6
-  { Tema: "L", Conexao: "M", Source: "SI", Browser: "Outros", Hora: "H00" },  // #356 → 16.67% · 3 vendas · CPV 6
-  { RAM: "R3", Conexao: "M", Movimento: "M0", Source: "SI", Hora: "H00" },  // #357 → 16.67% · 3 vendas · CPV 6
-  { RAM: "R3", Conexao: "M", Rede: "RC", Placement: "PS", Hora: "H11" },  // #358 → 16.67% · 2 vendas · CPV 6
-  { T: "T1", B: "B_absent", RAM: "R3", Placement: "PF", Hora: "H10" },  // #359 → 16.13% · 5 vendas · CPV 6.2
-  { T: "T1", C: "C_absent", RAM: "R3", Placement: "PF", Hora: "H10" },  // #360 → 16.13% · 5 vendas · CPV 6.2
-  { N: "N8", B: "B_absent", RAM: "R3", Placement: "PF", Hora: "H10" },  // #361 → 16.13% · 5 vendas · CPV 6.2
-  { N: "N8", C: "C_absent", RAM: "R3", Placement: "PF", Hora: "H10" },  // #362 → 16.13% · 5 vendas · CPV 6.2
-  { B: "B_absent", C: "C_absent", RAM: "R3", Placement: "PF", Hora: "H10" },  // #363 → 16.13% · 5 vendas · CPV 6.2
-  { B: "B_absent", RAM: "R3", V: "V1", Placement: "PF", Hora: "H10" },  // #364 → 16.13% · 5 vendas · CPV 6.2
-  { B: "B_absent", RAM: "R3", Device: "A", Placement: "PF", Hora: "H10" },  // #365 → 16.13% · 5 vendas · CPV 6.2
-  { B: "B_absent", RAM: "R3", Placement: "PF", Source: "SI", Hora: "H10" },  // #366 → 16.13% · 5 vendas · CPV 6.2
-  { B: "B_absent", RAM: "R3", Placement: "PF", Browser: "Outros", Hora: "H10" },  // #367 → 16.13% · 5 vendas · CPV 6.2
-  { C: "C_absent", RAM: "R3", V: "V1", Placement: "PF", Hora: "H10" },  // #368 → 16.13% · 5 vendas · CPV 6.2
-  { C: "C_absent", RAM: "R3", Device: "A", Placement: "PF", Hora: "H10" },  // #369 → 16.13% · 5 vendas · CPV 6.2
-  { C: "C_absent", RAM: "R3", Placement: "PF", Source: "SI", Hora: "H10" },  // #370 → 16.13% · 5 vendas · CPV 6.2
-  { C: "C_absent", RAM: "R3", Placement: "PF", Browser: "Outros", Hora: "H10" },  // #371 → 16.13% · 5 vendas · CPV 6.2
-  { T: "T1", B: "B7", Tema: "D", RAM: "R2", Hora: "H13" },  // #372 → 15.79% · 3 vendas · CPV 6.3
-  { T: "T1", Tema: "L", Conexao: "M", Movimento: "M0", Hora: "H00" },  // #373 → 15.79% · 3 vendas · CPV 6.3
-  { T: "T1", Tema: "L", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #374 → 15.79% · 3 vendas · CPV 6.3
-  { T: "T1", RAM: "R3", Rede: "RC", Source: "SI", Hora: "H00" },  // #375 → 15.79% · 3 vendas · CPV 6.3
-  { N: "N8", B: "B7", Tema: "D", RAM: "R2", Hora: "H13" },  // #376 → 15.79% · 3 vendas · CPV 6.3
-  { N: "N8", Tema: "L", Conexao: "M", Movimento: "M0", Hora: "H00" },  // #377 → 15.79% · 3 vendas · CPV 6.3
-  { N: "N8", Tema: "L", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #378 → 15.79% · 3 vendas · CPV 6.3
-  { N: "N8", RAM: "R3", Rede: "RC", Source: "SI", Hora: "H00" },  // #379 → 15.79% · 3 vendas · CPV 6.3
-  { B: "B7", C: "C0", Tema: "D", RAM: "R2", Hora: "H13" },  // #380 → 15.79% · 3 vendas · CPV 6.3
-  { B: "B7", Tema: "D", RAM: "R2", V: "V1", Hora: "H13" },  // #381 → 15.79% · 3 vendas · CPV 6.3
-  { B: "B7", Tema: "D", RAM: "R2", Device: "A", Hora: "H13" },  // #382 → 15.79% · 3 vendas · CPV 6.3
-  { B: "B7", Tema: "D", RAM: "R2", Movimento: "M0", Hora: "H13" },  // #383 → 15.79% · 3 vendas · CPV 6.3
-  { B: "B7", Tema: "D", RAM: "R2", Browser: "Outros", Hora: "H13" },  // #384 → 15.79% · 3 vendas · CPV 6.3
-  { Tema: "L", V: "V1", Conexao: "M", Movimento: "M0", Hora: "H00" },  // #385 → 15.79% · 3 vendas · CPV 6.3
-  { Tema: "L", V: "V1", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #386 → 15.79% · 3 vendas · CPV 6.3
-  { Tema: "L", Device: "A", Conexao: "M", Movimento: "M0", Hora: "H00" },  // #387 → 15.79% · 3 vendas · CPV 6.3
-  { Tema: "L", Device: "A", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #388 → 15.79% · 3 vendas · CPV 6.3
-  { Tema: "L", Conexao: "M", Movimento: "M0", Browser: "Outros", Hora: "H00" },  // #389 → 15.79% · 3 vendas · CPV 6.3
-  { Tema: "L", Movimento: "M0", Rede: "RC", Browser: "Outros", Hora: "H00" },  // #390 → 15.79% · 3 vendas · CPV 6.3
-  { RAM: "R3", V: "V1", Rede: "RC", Source: "SI", Hora: "H00" },  // #391 → 15.79% · 3 vendas · CPV 6.3
-  { RAM: "R3", Device: "A", Rede: "RC", Source: "SI", Hora: "H00" },  // #392 → 15.79% · 3 vendas · CPV 6.3
-  { RAM: "R3", Rede: "RC", Source: "SI", Browser: "Outros", Hora: "H00" },  // #393 → 15.79% · 3 vendas · CPV 6.3
-  { T: "T1", N: "N6", B: "B10", C: "C0", RAM: "R3" },  // #394 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", N: "N6", B: "B10", RAM: "R3", V: "V1" },  // #395 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", N: "N6", B: "B10", RAM: "R3", Device: "A" },  // #396 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", N: "N6", B: "B10", RAM: "R3", Browser: "Outros" },  // #397 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", N: "N8", C: "C1", Source: "SI", Hora: "H00" },  // #398 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", B: "B4", Tema: "D", Conexao: "M", Placement: "PS" },  // #399 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", B: "B10", Tema: "L", Placement: "PF", Hora: "H18" },  // #400 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", B: "B10", RAM: "R2", Source: "SI", Hora: "H09" },  // #401 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", C: "C1", V: "V1", Source: "SI", Hora: "H00" },  // #402 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", C: "C1", Device: "A", Source: "SI", Hora: "H00" },  // #403 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", C: "C1", Movimento: "M0", Source: "SI", Hora: "H00" },  // #404 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", C: "C1", Source: "SI", Browser: "Outros", Hora: "H00" },  // #405 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", Tema: "D", RAM: "R1", Browser: "Outros", Hora: "H09" },  // #406 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", Placement: "PR", Source: "SI", Browser: "Outros", Hora: "H03" },  // #407 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N6", B: "B10", C: "C0", RAM: "R3", V: "V1" },  // #408 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N6", B: "B10", C: "C0", RAM: "R3", Device: "A" },  // #409 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N6", B: "B10", C: "C0", RAM: "R3", Browser: "Outros" },  // #410 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N8", B: "B10", Tema: "L", RAM: "R2", Hora: "H09" },  // #411 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N8", B: "B8", Tema: "L", RAM: "R3", Hora: "H08" },  // #412 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N8", B: "B4", Tema: "D", Conexao: "M", Placement: "PS" },  // #413 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N8", B: "B10", Tema: "L", Placement: "PF", Hora: "H18" },  // #414 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N6", B: "B10", RAM: "R3", V: "V1", Device: "A" },  // #415 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N6", B: "B10", RAM: "R3", V: "V1", Browser: "Outros" },  // #416 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N6", B: "B10", RAM: "R3", Device: "A", Browser: "Outros" },  // #417 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N8", B: "B10", RAM: "R2", Source: "SI", Hora: "H09" },  // #418 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N8", C: "C1", V: "V1", Source: "SI", Hora: "H00" },  // #419 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N8", C: "C1", Device: "A", Source: "SI", Hora: "H00" },  // #420 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N8", C: "C1", Movimento: "M0", Source: "SI", Hora: "H00" },  // #421 → 15.38% · 2 vendas · CPV 6.5
-  { N: "N8", C: "C1", Source: "SI", Browser: "Outros", Hora: "H00" },  // #422 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B_absent", Tema: "D", RAM: "R2", Conexao: "W", Placement: "PU" },  // #423 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B_absent", Tema: "D", RAM: "R2", Conexao: "W", Source: "SU" },  // #424 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B10", Tema: "L", RAM: "R2", Movimento: "M0", Hora: "H09" },  // #425 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B_absent", Tema: "D", RAM: "R2", Rede: "RH", Placement: "PU" },  // #426 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B_absent", Tema: "D", RAM: "R2", Rede: "RH", Source: "SU" },  // #427 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B4", Tema: "D", V: "V1", Conexao: "M", Placement: "PS" },  // #428 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B10", Tema: "L", V: "V1", Placement: "PF", Hora: "H18" },  // #429 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B4", Tema: "D", Device: "A", Conexao: "M", Placement: "PS" },  // #430 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B10", Tema: "L", Device: "A", Placement: "PF", Hora: "H18" },  // #431 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B4", Tema: "D", Conexao: "M", Movimento: "M0", Placement: "PS" },  // #432 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B4", Tema: "D", Conexao: "M", Placement: "PS", Source: "SI" },  // #433 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B4", Tema: "D", Conexao: "M", Placement: "PS", Browser: "Outros" },  // #434 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B10", Tema: "L", Movimento: "M0", Placement: "PF", Hora: "H18" },  // #435 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B10", Tema: "L", Placement: "PF", Source: "SI", Hora: "H18" },  // #436 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B10", Tema: "L", Placement: "PF", Browser: "Outros", Hora: "H18" },  // #437 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B10", RAM: "R2", V: "V1", Source: "SI", Hora: "H09" },  // #438 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B10", RAM: "R2", Device: "A", Source: "SI", Hora: "H09" },  // #439 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B10", RAM: "R2", Movimento: "M0", Source: "SI", Hora: "H09" },  // #440 → 15.38% · 2 vendas · CPV 6.5
-  { B: "B10", RAM: "R2", Source: "SI", Browser: "Outros", Hora: "H09" },  // #441 → 15.38% · 2 vendas · CPV 6.5
-  { C: "C_absent", Tema: "D", RAM: "R2", Conexao: "W", Placement: "PU" },  // #442 → 15.38% · 2 vendas · CPV 6.5
-  { C: "C_absent", Tema: "D", RAM: "R2", Conexao: "W", Source: "SU" },  // #443 → 15.38% · 2 vendas · CPV 6.5
-  { C: "C_absent", Tema: "D", RAM: "R2", Rede: "RH", Placement: "PU" },  // #444 → 15.38% · 2 vendas · CPV 6.5
-  { C: "C_absent", Tema: "D", RAM: "R2", Rede: "RH", Source: "SU" },  // #445 → 15.38% · 2 vendas · CPV 6.5
-  { C: "C0", Tema: "L", Conexao: "M", Rede: "RC", Hora: "H00" },  // #446 → 15.38% · 2 vendas · CPV 6.5
-  { C: "C0", RAM: "R3", Conexao: "M", Rede: "RC", Hora: "H00" },  // #447 → 15.38% · 2 vendas · CPV 6.5
-  { C: "C1", V: "V1", Device: "A", Source: "SI", Hora: "H00" },  // #448 → 15.38% · 2 vendas · CPV 6.5
-  { C: "C1", V: "V1", Movimento: "M0", Source: "SI", Hora: "H00" },  // #449 → 15.38% · 2 vendas · CPV 6.5
-  { C: "C1", V: "V1", Source: "SI", Browser: "Outros", Hora: "H00" },  // #450 → 15.38% · 2 vendas · CPV 6.5
-  { C: "C1", Device: "A", Movimento: "M0", Source: "SI", Hora: "H00" },  // #451 → 15.38% · 2 vendas · CPV 6.5
-  { C: "C1", Device: "A", Source: "SI", Browser: "Outros", Hora: "H00" },  // #452 → 15.38% · 2 vendas · CPV 6.5
-  { C: "C1", Movimento: "M0", Source: "SI", Browser: "Outros", Hora: "H00" },  // #453 → 15.38% · 2 vendas · CPV 6.5
-  { Tema: "L", RAM: "R3", Movimento: "M0", Placement: "PR", Hora: "H00" },  // #454 → 15.38% · 2 vendas · CPV 6.5
-  { Tema: "D", RAM: "R3", Movimento: "M0", Source: "SI", Hora: "H03" },  // #455 → 15.38% · 2 vendas · CPV 6.5
-  { T: "T1", B: "B7", Tema: "D", Placement: "PF", Hora: "H13" },  // #456 → 15% · 3 vendas · CPV 6.7
-  { T: "T1", B: "B4", Conexao: "M", Rede: "RC", Placement: "PS" },  // #457 → 15% · 3 vendas · CPV 6.7
-  { T: "T1", Tema: "L", RAM: "R3", Conexao: "M", Hora: "H00" },  // #458 → 15% · 3 vendas · CPV 6.7
-  { T: "T1", RAM: "R3", Conexao: "M", Source: "SI", Hora: "H00" },  // #459 → 15% · 3 vendas · CPV 6.7
-  { T: "T1", RAM: "R3", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #460 → 15% · 3 vendas · CPV 6.7
-  { T: "T1", Conexao: "M", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #461 → 15% · 3 vendas · CPV 6.7
-  { N: "N8", B: "B7", Tema: "D", Placement: "PF", Hora: "H13" },  // #462 → 15% · 3 vendas · CPV 6.7
-  { N: "N8", B: "B4", Conexao: "M", Rede: "RC", Placement: "PS" },  // #463 → 15% · 3 vendas · CPV 6.7
-  { N: "N8", Tema: "L", RAM: "R3", Conexao: "M", Hora: "H00" },  // #464 → 15% · 3 vendas · CPV 6.7
-  { N: "N8", RAM: "R3", Conexao: "M", Source: "SI", Hora: "H00" },  // #465 → 15% · 3 vendas · CPV 6.7
-  { N: "N8", RAM: "R3", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #466 → 15% · 3 vendas · CPV 6.7
-  { N: "N8", Conexao: "M", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #467 → 15% · 3 vendas · CPV 6.7
-  { B: "B7", C: "C0", Tema: "D", Placement: "PF", Hora: "H13" },  // #468 → 15% · 3 vendas · CPV 6.7
-  { B: "B4", C: "C0", Conexao: "M", Rede: "RC", Placement: "PS" },  // #469 → 15% · 3 vendas · CPV 6.7
-  { B: "B7", Tema: "D", V: "V1", Placement: "PF", Hora: "H13" },  // #470 → 15% · 3 vendas · CPV 6.7
-  { B: "B7", Tema: "D", Device: "A", Placement: "PF", Hora: "H13" },  // #471 → 15% · 3 vendas · CPV 6.7
-  { B: "B7", Tema: "D", Movimento: "M0", Placement: "PF", Hora: "H13" },  // #472 → 15% · 3 vendas · CPV 6.7
-  { B: "B7", Tema: "D", Placement: "PF", Source: "SI", Hora: "H13" },  // #473 → 15% · 3 vendas · CPV 6.7
-  { B: "B7", Tema: "D", Placement: "PF", Browser: "Outros", Hora: "H13" },  // #474 → 15% · 3 vendas · CPV 6.7
-  { B: "B4", V: "V1", Conexao: "M", Rede: "RC", Placement: "PS" },  // #475 → 15% · 3 vendas · CPV 6.7
-  { B: "B4", Device: "A", Conexao: "M", Rede: "RC", Placement: "PS" },  // #476 → 15% · 3 vendas · CPV 6.7
-  { B: "B4", Conexao: "M", Rede: "RC", Placement: "PS", Source: "SI" },  // #477 → 15% · 3 vendas · CPV 6.7
-  { B: "B4", Conexao: "M", Rede: "RC", Placement: "PS", Browser: "Outros" },  // #478 → 15% · 3 vendas · CPV 6.7
-  { Tema: "L", RAM: "R3", V: "V1", Conexao: "M", Hora: "H00" },  // #479 → 15% · 3 vendas · CPV 6.7
-  { Tema: "L", RAM: "R3", Device: "A", Conexao: "M", Hora: "H00" },  // #480 → 15% · 3 vendas · CPV 6.7
-  { Tema: "L", RAM: "R3", Conexao: "M", Browser: "Outros", Hora: "H00" },  // #481 → 15% · 3 vendas · CPV 6.7
-  { RAM: "R3", V: "V1", Conexao: "M", Source: "SI", Hora: "H00" },  // #482 → 15% · 3 vendas · CPV 6.7
-  { RAM: "R3", V: "V1", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #483 → 15% · 3 vendas · CPV 6.7
-  { RAM: "R3", Device: "A", Conexao: "M", Source: "SI", Hora: "H00" },  // #484 → 15% · 3 vendas · CPV 6.7
-  { RAM: "R3", Device: "A", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #485 → 15% · 3 vendas · CPV 6.7
-  { RAM: "R3", Conexao: "M", Source: "SI", Browser: "Outros", Hora: "H00" },  // #486 → 15% · 3 vendas · CPV 6.7
-  { RAM: "R3", Movimento: "M0", Rede: "RC", Browser: "Outros", Hora: "H00" },  // #487 → 15% · 3 vendas · CPV 6.7
-  { V: "V1", Conexao: "M", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #488 → 15% · 3 vendas · CPV 6.7
-  { Device: "A", Conexao: "M", Movimento: "M0", Rede: "RC", Hora: "H00" },  // #489 → 15% · 3 vendas · CPV 6.7
-  { Conexao: "M", Movimento: "M0", Rede: "RC", Browser: "Outros", Hora: "H00" },  // #490 → 15% · 3 vendas · CPV 6.7
-  { B: "B_absent", RAM: "R3", Conexao: "W", Placement: "PF", Hora: "H10" },  // #491 → 14.81% · 4 vendas · CPV 6.8
-  { B: "B_absent", RAM: "R3", Rede: "RH", Placement: "PF", Hora: "H10" },  // #492 → 14.81% · 4 vendas · CPV 6.8
-  { C: "C_absent", RAM: "R3", Conexao: "W", Placement: "PF", Hora: "H10" },  // #493 → 14.81% · 4 vendas · CPV 6.8
-  { C: "C_absent", RAM: "R3", Rede: "RH", Placement: "PF", Hora: "H10" },  // #494 → 14.81% · 4 vendas · CPV 6.8
-  { T: "T1", N: "N8", Tema: "L", Conexao: "M", Hora: "H00" },  // #495 → 14.29% · 3 vendas · CPV 7
-  { T: "T1", N: "N8", Tema: "L", Rede: "RC", Hora: "H00" },  // #496 → 14.29% · 3 vendas · CPV 7
-  { T: "T1", N: "N8", Tema: "D", Placement: "PU", Hora: "H19" },  // #497 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", N: "N8", Tema: "D", Source: "SU", Hora: "H19" },  // #498 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", B: "B10", RAM: "R2", Source: "SI", Hora: "H18" },  // #499 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", C: "C0", Conexao: "M", Rede: "RC", Hora: "H00" },  // #500 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "D", RAM: "R3", Source: "SI", Hora: "H03" },  // #501 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "L", V: "V1", Conexao: "M", Hora: "H00" },  // #502 → 14.29% · 3 vendas · CPV 7
-  { T: "T1", Tema: "L", V: "V1", Rede: "RC", Hora: "H00" },  // #503 → 14.29% · 3 vendas · CPV 7
-  { T: "T1", Tema: "D", V: "V1", Placement: "PU", Hora: "H19" },  // #504 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "D", V: "V1", Source: "SU", Hora: "H19" },  // #505 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "L", Device: "A", Conexao: "M", Hora: "H00" },  // #506 → 14.29% · 3 vendas · CPV 7
-  { T: "T1", Tema: "L", Device: "A", Rede: "RC", Hora: "H00" },  // #507 → 14.29% · 3 vendas · CPV 7
-  { T: "T1", Tema: "D", Device: "A", Placement: "PU", Hora: "H19" },  // #508 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "D", Device: "A", Source: "SU", Hora: "H19" },  // #509 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "D", Conexao: "W", Placement: "PU", Hora: "H19" },  // #510 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "L", Conexao: "W", Placement: "PR", Hora: "H09" },  // #511 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "D", Conexao: "W", Source: "SU", Hora: "H19" },  // #512 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "L", Conexao: "M", Browser: "Outros", Hora: "H00" },  // #513 → 14.29% · 3 vendas · CPV 7
-  { T: "T1", Tema: "D", Movimento: "M0", Placement: "PU", Hora: "H19" },  // #514 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "D", Movimento: "M0", Source: "SU", Hora: "H19" },  // #515 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "D", Rede: "RH", Placement: "PU", Hora: "H19" },  // #516 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "D", Rede: "RH", Source: "SU", Hora: "H19" },  // #517 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "L", Rede: "RC", Browser: "Outros", Hora: "H00" },  // #518 → 14.29% · 3 vendas · CPV 7
-  { T: "T1", Tema: "D", Placement: "PU", Source: "SU", Hora: "H19" },  // #519 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "D", Placement: "PU", Browser: "Outros", Hora: "H19" },  // #520 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Tema: "D", Source: "SU", Browser: "Outros", Hora: "H19" },  // #521 → 14.29% · 2 vendas · CPV 7
-  { T: "T1", Movimento: "M0", Rede: "RC", Source: "SI", Hora: "H00" },  // #522 → 14.29% · 3 vendas · CPV 7
-  { N: "N8", B: "B10", RAM: "R2", Source: "SI", Hora: "H18" },  // #523 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", C: "C0", Conexao: "M", Rede: "RC", Hora: "H00" },  // #524 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "L", RAM: "R2", Placement: "PS", Hora: "H00" },  // #525 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "D", RAM: "R3", Source: "SI", Hora: "H03" },  // #526 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "L", V: "V1", Conexao: "M", Hora: "H00" },  // #527 → 14.29% · 3 vendas · CPV 7
-  { N: "N8", Tema: "L", V: "V1", Rede: "RC", Hora: "H00" },  // #528 → 14.29% · 3 vendas · CPV 7
-  { N: "N8", Tema: "D", V: "V1", Placement: "PU", Hora: "H19" },  // #529 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "D", V: "V1", Source: "SU", Hora: "H19" },  // #530 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "L", Device: "A", Conexao: "M", Hora: "H00" },  // #531 → 14.29% · 3 vendas · CPV 7
-  { N: "N8", Tema: "L", Device: "A", Rede: "RC", Hora: "H00" },  // #532 → 14.29% · 3 vendas · CPV 7
-  { N: "N8", Tema: "D", Device: "A", Placement: "PU", Hora: "H19" },  // #533 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "D", Device: "A", Source: "SU", Hora: "H19" },  // #534 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "D", Conexao: "W", Placement: "PU", Hora: "H19" },  // #535 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "L", Conexao: "W", Placement: "PR", Hora: "H09" },  // #536 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "D", Conexao: "W", Source: "SU", Hora: "H19" },  // #537 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "L", Conexao: "M", Browser: "Outros", Hora: "H00" },  // #538 → 14.29% · 3 vendas · CPV 7
-  { N: "N8", Tema: "D", Movimento: "M0", Placement: "PU", Hora: "H19" },  // #539 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "D", Movimento: "M0", Source: "SU", Hora: "H19" },  // #540 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "D", Rede: "RH", Placement: "PU", Hora: "H19" },  // #541 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "D", Rede: "RH", Source: "SU", Hora: "H19" },  // #542 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "L", Rede: "RC", Browser: "Outros", Hora: "H00" },  // #543 → 14.29% · 3 vendas · CPV 7
-  { N: "N8", Tema: "D", Placement: "PU", Source: "SU", Hora: "H19" },  // #544 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "D", Placement: "PU", Browser: "Outros", Hora: "H19" },  // #545 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Tema: "D", Source: "SU", Browser: "Outros", Hora: "H19" },  // #546 → 14.29% · 2 vendas · CPV 7
-  { N: "N8", Movimento: "M0", Rede: "RC", Source: "SI", Hora: "H00" },  // #547 → 14.29% · 3 vendas · CPV 7
-  { B: "B10", C: "C0", RAM: "R2", Source: "SI", Hora: "H18" },  // #548 → 14.29% · 2 vendas · CPV 7
-  { B: "B10", Tema: "L", RAM: "R2", Conexao: "W", Hora: "H09" },  // #549 → 14.29% · 2 vendas · CPV 7
-  { B: "B10", Tema: "D", RAM: "R3", Source: "SI", Hora: "H07" },  // #550 → 14.29% · 2 vendas · CPV 7
-  { B: "B10", RAM: "R2", V: "V1", Source: "SI", Hora: "H18" },  // #551 → 14.29% · 2 vendas · CPV 7
-  { B: "B10", RAM: "R2", Device: "A", Source: "SI", Hora: "H18" },  // #552 → 14.29% · 2 vendas · CPV 7
-  { B: "B10", RAM: "R2", Movimento: "M0", Source: "SI", Hora: "H18" },  // #553 → 14.29% · 2 vendas · CPV 7
-  { B: "B10", RAM: "R2", Source: "SI", Browser: "Outros", Hora: "H18" },  // #554 → 14.29% · 2 vendas · CPV 7
-  { C: "C0", Tema: "L", Conexao: "W", Placement: "PR", Hora: "H09" },  // #555 → 14.29% · 2 vendas · CPV 7
-  { C: "C0", V: "V1", Conexao: "M", Rede: "RC", Hora: "H00" },  // #556 → 14.29% · 2 vendas · CPV 7
-  { C: "C0", Device: "A", Conexao: "M", Rede: "RC", Hora: "H00" },  // #557 → 14.29% · 2 vendas · CPV 7
-  { C: "C0", Conexao: "M", Rede: "RC", Browser: "Outros", Hora: "H00" },  // #558 → 14.29% · 2 vendas · CPV 7
-  { Tema: "L", RAM: "R2", V: "V1", Placement: "PS", Hora: "H00" },  // #559 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", RAM: "R3", V: "V1", Source: "SI", Hora: "H03" },  // #560 → 14.29% · 2 vendas · CPV 7
-  { Tema: "L", RAM: "R2", Device: "A", Placement: "PS", Hora: "H00" },  // #561 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", RAM: "R3", Device: "A", Source: "SI", Hora: "H03" },  // #562 → 14.29% · 2 vendas · CPV 7
-  { Tema: "L", RAM: "R2", Conexao: "W", Placement: "PS", Hora: "H00" },  // #563 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", RAM: "R3", Conexao: "W", Source: "SI", Hora: "H03" },  // #564 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", RAM: "R3", Movimento: "M0", Rede: "RH", Hora: "H03" },  // #565 → 14.29% · 2 vendas · CPV 7
-  { Tema: "L", RAM: "R2", Rede: "RH", Placement: "PS", Hora: "H00" },  // #566 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", RAM: "R3", Source: "SI", Browser: "Outros", Hora: "H03" },  // #567 → 14.29% · 2 vendas · CPV 7
-  { Tema: "L", V: "V1", Device: "A", Conexao: "M", Hora: "H00" },  // #568 → 14.29% · 3 vendas · CPV 7
-  { Tema: "L", V: "V1", Device: "A", Rede: "RC", Hora: "H00" },  // #569 → 14.29% · 3 vendas · CPV 7
-  { Tema: "D", V: "V1", Device: "A", Placement: "PU", Hora: "H19" },  // #570 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", V: "V1", Device: "A", Source: "SU", Hora: "H19" },  // #571 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", V: "V1", Conexao: "W", Placement: "PU", Hora: "H19" },  // #572 → 14.29% · 2 vendas · CPV 7
-  { Tema: "L", V: "V1", Conexao: "W", Placement: "PR", Hora: "H09" },  // #573 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", V: "V1", Conexao: "W", Source: "SU", Hora: "H19" },  // #574 → 14.29% · 2 vendas · CPV 7
-  { Tema: "L", V: "V1", Conexao: "M", Browser: "Outros", Hora: "H00" },  // #575 → 14.29% · 3 vendas · CPV 7
-  { Tema: "D", V: "V1", Movimento: "M0", Placement: "PU", Hora: "H19" },  // #576 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", V: "V1", Movimento: "M0", Source: "SU", Hora: "H19" },  // #577 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", V: "V1", Rede: "RH", Placement: "PU", Hora: "H19" },  // #578 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", V: "V1", Rede: "RH", Source: "SU", Hora: "H19" },  // #579 → 14.29% · 2 vendas · CPV 7
-  { Tema: "L", V: "V1", Rede: "RC", Browser: "Outros", Hora: "H00" },  // #580 → 14.29% · 3 vendas · CPV 7
-  { Tema: "D", V: "V1", Placement: "PU", Source: "SU", Hora: "H19" },  // #581 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", V: "V1", Placement: "PU", Browser: "Outros", Hora: "H19" },  // #582 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", V: "V1", Source: "SU", Browser: "Outros", Hora: "H19" },  // #583 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", Device: "A", Conexao: "W", Placement: "PU", Hora: "H19" },  // #584 → 14.29% · 2 vendas · CPV 7
-  { Tema: "L", Device: "A", Conexao: "W", Placement: "PR", Hora: "H09" },  // #585 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", Device: "A", Conexao: "W", Source: "SU", Hora: "H19" },  // #586 → 14.29% · 2 vendas · CPV 7
-  { Tema: "L", Device: "A", Conexao: "M", Browser: "Outros", Hora: "H00" },  // #587 → 14.29% · 3 vendas · CPV 7
-  { Tema: "D", Device: "A", Movimento: "M0", Placement: "PU", Hora: "H19" },  // #588 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", Device: "A", Movimento: "M0", Source: "SU", Hora: "H19" },  // #589 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", Device: "A", Rede: "RH", Placement: "PU", Hora: "H19" },  // #590 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", Device: "A", Rede: "RH", Source: "SU", Hora: "H19" },  // #591 → 14.29% · 2 vendas · CPV 7
-  { Tema: "L", Device: "A", Rede: "RC", Browser: "Outros", Hora: "H00" },  // #592 → 14.29% · 3 vendas · CPV 7
-  { Tema: "D", Device: "A", Placement: "PU", Source: "SU", Hora: "H19" },  // #593 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", Device: "A", Placement: "PU", Browser: "Outros", Hora: "H19" },  // #594 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", Device: "A", Source: "SU", Browser: "Outros", Hora: "H19" },  // #595 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", Conexao: "W", Movimento: "M0", Placement: "PU", Hora: "H19" },  // #596 → 14.29% · 2 vendas · CPV 7
-  { Tema: "L", Conexao: "W", Movimento: "M0", Placement: "PR", Hora: "H09" },  // #597 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", Conexao: "W", Movimento: "M0", Source: "SU", Hora: "H19" },  // #598 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", Conexao: "W", Rede: "RH", Placement: "PU", Hora: "H19" },  // #599 → 14.29% · 2 vendas · CPV 7
-  { Tema: "D", Conexao: "W", Rede: "RH", Source: "SU", Hora: "H19" },  // #600 → 14.29% · 2 vendas · CPV 7
-]
-// ─────────────────────────────────────────────────
+const REGRAS_TOP05 = []
 
 // ─────────────────────────────────────────────────
-// TOP06 — cole as regras aqui quando tiver
+// TOP06 — 5 variáveis
 // ─────────────────────────────────────────────────
-const REGRAS_TOP06 = [
-  // { N: "N8", B: "B4", ... },
-]
+const REGRAS_TOP06 = []
 
 // ─────────────────────────────────────────────────
 // Função de match
@@ -1031,24 +596,26 @@ const topTag = bateuTop06 ? "F6"
 // =========================================================
 // MONTAGEM DO UC FINAL
 // =========================================================
-const idTag = "ID" + userId  // sempre 10 chars
+const idTag = "ID" + userId  // sempre 8+2 = 10 chars
 
-const corpo = (
-  baseUC            +
-  tempoTag          +
-  velTag            +
-  batObj.bateria    +
-  batObj.carregando +
-  tema              +
-  ram               +
-  vib               +
-  device            +
-  conexao           +
-  movimento         +
-  redeTag           +
-  placementTag      +
+const corpoParts = [
+  baseUC,
+  tempoTag,
+  velTag,
+  batObj.bateria,
+  batObj.carregando,
+  tema,
+  ram,
+  vib,
+  device,
+  conexao,
+  movimento,
+  redeTag,
+  placementTag,
   sourceTag
-).replace(/[^a-zA-Z0-9]/g, "")
+]
+
+const corpo = corpoParts.join("").replace(/[^a-zA-Z0-9]/g, "")
 
 const MAX          = 48
 const espacoCorpo  = MAX - idTag.length - topTag.length
@@ -1076,8 +643,21 @@ try {
     conexao,
     rede        : redeTag,
     velocidade  : velTag,
-    uc_completo : finalUC
+    uc_completo : finalUC,
+    // também envia as novas variáveis para debug
+    min_dezena  : minDezena,
+    min_unidade : minUnidade,
+    seg_metade  : segMetade,
+    hora_par    : horaPar,
+    dia_semana  : diaSemana,
+    dia_par     : diaPar,
+    periodo     : periodo,
+    b_par       : bPar,
+    n_par       : nPar,
+    fbp_flag    : FBP,
+    fbc_flag    : FBC
   }
+  if(ENABLE_PARIDADE && paridadeTag) payload.paridade = paridadeTag
 
   fetch(SHEETS_URL, {
     method  : "POST",
